@@ -75,6 +75,8 @@ class Piece:
         for move in self.get_control(board.pieces.get_set('position', 'black'), board.pieces.get_set('position', 'white')):
             # Create yet another copy of board.
             board_copy = board.get_board_copy()
+            if board_copy.get_piece_at(move) != None:
+                board_copy.remove_piece_at(move)
             self_copy = [piece for piece in board_copy.pieces.get_pieces() if repr(piece)==repr(self)][0]
             self_copy.set_position(move)
             if not board_copy.king_in_check(self.white):
@@ -287,9 +289,13 @@ class King(Piece):
         for move in self.get_control(black_position, white_position):
             # Create yet another copy of board.
             board_copy = board.get_board_copy()
+            if board_copy.get_piece_at(move) != None:
+                board_copy.remove_piece_at(move)
             self_copy = [piece for piece in board_copy.pieces.get_pieces() if piece.get_identity() == self.get_identity()][0]
             self_copy.set_position(move)
-            if not {self_copy.position}.issubset(board_copy.pieces.get_set('control', not self.white)):
+            #if not {self_copy.position}.issubset(board_copy.pieces.get_set('control', not self.white)):
+            #    move_set.add(move)
+            if not board_copy.king_in_check(self.white):
                 move_set.add(move)
             del board_copy
         return move_set
@@ -342,6 +348,8 @@ class Pawn(Piece):
         for move in moves_to_check:
             # Create yet another copy of board.
             board_copy = board.get_board_copy()
+            if board_copy.get_piece_at(move) != None:
+                board_copy.remove_piece_at(move)
             self_copy = [piece for piece in board_copy.pieces.get_pieces() if repr(piece)==repr(self)][0]
             self_copy.set_position(move)
             if not board_copy.king_in_check(self.white):
@@ -628,7 +636,7 @@ class Board:
             if square == short_castle:
                 if turn % 2:
                     piece.set_position('g1')
-                    self.pieces.get_dict['h1'].set_position('f1')
+                    self.pieces['h1'].set_position('f1')
                     return None
                 else:
                     piece.set_position('g8')
@@ -699,12 +707,27 @@ class Game:
         
     def select_move(self, square: str) -> SelectionType:
         color = self.determine_color()
+        moves = self.board.pieces.get_dict('instance', 'moves', color, self.board)[self.piece_selection]
+        # Castling
+        if 'O-O' in moves:
+            short_castle = (['g8', 'h8'], ['g1', 'h1'])[color]
+            if square in short_castle:
+                self.square_selection = 'O-O'
+                return SelectionType.SELECTED
+        if 'O-O-O' in moves:
+            long_castle = (['a8', 'c8'], ['a1', 'c1'])[color]
+            if square in long_castle:
+                self.square_selection = 'O-O-O'
+                return SelectionType.SELECTED
+            
+        # Non-Castling Moves and Promotion    
         if square in self.board.pieces.get_set('position', color):
+            self.piece_selection = self.board.pieces[square]
             return SelectionType.RESELECT
-        elif square + 'Q' in self.board.pieces.get_dict('instance', 'moves', color, self.board)[self.piece_selection]:
+        elif square + 'Q' in moves:
             self.square_selection = square
             return SelectionType.PROMOTION
-        elif square not in self.board.pieces.get_dict('instance', 'moves', color, self.board)[self.piece_selection]:
+        elif square not in moves:
             return SelectionType.NO_MOVE
         else:
             self.square_selection = square

@@ -337,7 +337,6 @@ class CLIController:
             selection_message = self.game.select_move(square_selection)
             match selection_message:
                 case SelectionType.RESELECT:
-                    self.ready_to_select_move = False
                     return GameInfo(self.game, selection_message)
                 case SelectionType.NO_MOVE:
                     return GameInfo(self.game, selection_message)
