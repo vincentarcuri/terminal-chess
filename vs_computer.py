@@ -5,6 +5,8 @@ from enum import Enum
 from mdl import *
 from piece_loader import PieceLoader
 
+import c_caller
+
 
 class UnicodePieces(Enum):
     WHITE_KING = u"\u2654"
@@ -317,6 +319,7 @@ class CLIController:
     def __init__(self):
         self.game = Game()
         self.ready_to_select_move = False
+        self.opponent_turn = False
     
     def handle_event_and_return_info(self, event_obj: WindowEvent, window: Window):
         if event_obj.event == WindowEvent.IDLE:
@@ -344,6 +347,7 @@ class CLIController:
                 case SelectionType.SELECTED:
                     game_state = self.game.move_and_next_turn()
                     self.ready_to_select_move = False
+                    self.opponent_turn = True
                     return GameInfo(self.game, selection=None, game_state=game_state)
                 case SelectionType.PROMOTION:
                     # Get the piece to promote.
@@ -358,9 +362,18 @@ class CLIController:
                     self.game.piece_selection = self.game.board.get_piece_at(position)
                     game_state = self.game.move_and_next_turn()
                     self.ready_to_select_move = False
+                    self.opponent_turn = True
                     return GameInfo(self.game, selection=None, game_state=game_state)
-                    
                 
+    def computer_move(self) -> GameInfo:
+        action = c_caller.from_game_get_move(self.game)
+        self.game.select_piece(action[0])
+        self.game.select_move(action[1])
+        game_state = self.game.move_and_next_turn()
+        self.opponent_turn = False
+        return GameInfo(self.game, selection=None, game_state=game_state)
+
+                    
                 
                 
             
@@ -374,16 +387,14 @@ def main():
         game_info = controller.handle_event_and_return_info(window_event, window)
         window.update_board(game_info)
         window.update()
+        if controller.opponent_turn:
+            game_info = controller.computer_move()
+            window.update_board(game_info)
+            window.update()
         
 
 
 
 
 if __name__ == '__main__':
-
-
     main()
-
-
-
-

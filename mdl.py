@@ -84,6 +84,18 @@ class Piece:
             del board_copy
         return move_set
     
+    def return_moves_without_king_in_check(self, moves_to_check: list[str], board:'Board') -> set[str]:
+        move_set = set()
+        for move in moves_to_check:
+            # Create yet another copy of board.
+            board_copy = board.get_board_copy()
+            self_copy = board_copy.get_piece_at(self.position)
+            board_copy.move(self_copy, move)
+            if not board_copy.king_in_check(self.white):
+                move_set.add(move)
+            del board_copy
+        return move_set
+    
     
     def get_identity(self):
         return f"{self.letter}{self.position}"
@@ -182,7 +194,7 @@ class Rook(Piece):
         super().__init__(position, white)
         self.letter = 'R'
         self.has_moved = False
-        self.points = 3
+        self.points = 5
 
     def get_control(self, black_position: set, white_position: set) -> set[str]:
         control_set = set()
@@ -324,45 +336,53 @@ class Pawn(Piece):
     
     def get_moves(self, board: 'Board') -> set[str]:
 
-        black_position = board.pieces.get_set('position', 'black')
-        white_position = board.pieces.get_set('position', 'white')
-        
-        forward_move = (self.squares.down(self.position), self.squares.up(self.position))
-        double_forward_move = (self.squares.down(forward_move[0]), self.squares.up(forward_move[1]))
+        player_position = board.pieces.get_set('position', self.white)
+        opponent_position = board.pieces.get_set('position', not self.white)
+        starting_position = ('7', '2')[self.white]
+        promotion_position = ('1', '8')[self.white]
+
+        # Possible Moves
         moves_to_check = []
-        moves_to_check.append(forward_move[self.white])
-        # Add double move on first move.
-        if self.position[1] == ('7', '2')[self.white]:
-            moves_to_check.append(double_forward_move[self.white])
-        # Add diagonal-take squares.
-        for move in self.get_control(black_position, white_position):
-            if {move}.issubset((black_position, white_position)[not self.white]):
-                moves_to_check.append(move)
-        # Add en passant take
+        forward_move = (self.squares.down(self.position), self.squares.up(self.position))[self.white]
+        double_forward_move = (self.squares.down(forward_move), self.squares.up(forward_move))[self.white]
+        diagonal_left = self.squares.left(forward_move)
+        diagonal_right = self.squares.right(forward_move)
+        
+        # Add forward moves, if promotion available add all four different promotions
+        if forward_move not in player_position and forward_move not in opponent_position:
+            if forward_move[1] == promotion_position:
+                moves_to_check += self.add_promotion_letters_to_move(forward_move)
+            elif self.position[1] == starting_position and (
+                    double_forward_move not in player_position and double_forward_move not in opponent_position):
+                moves_to_check.append(forward_move)
+                moves_to_check.append(double_forward_move)
+            else:
+                moves_to_check.append(forward_move)
+        for diagonal in [diagonal_left, diagonal_right]:
+            if diagonal in opponent_position:
+                if diagonal[1] == promotion_position:
+                    moves_to_check += self.add_promotion_letters_to_move(diagonal)
+                else:
+                    moves_to_check.append(diagonal)
+        
+        # Add en passant taking move if available.
         if board.en_passant:
             en_passant_squares = [self.squares.right(board.en_passant), self.squares.left(board.en_passant)]
             en_passant_take = (self.squares.down(board.en_passant), self.squares.up(board.en_passant))[self.white]
             if self.position in en_passant_squares:
                 moves_to_check.append(en_passant_take)
-        move_set = set()
-        for move in moves_to_check:
-            # Create yet another copy of board.
-            board_copy = board.get_board_copy()
-            if board_copy.get_piece_at(move) != None:
-                board_copy.remove_piece_at(move)
-            self_copy = [piece for piece in board_copy.pieces.get_pieces() if repr(piece)==repr(self)][0]
-            self_copy.set_position(move)
-            if not board_copy.king_in_check(self.white):
-                move_set.add(move)
-            del board_copy
-        # Add Promotion Squares
-        promotion_rank = ('1', '8')[self.white]
-        promotion_squares = [move for move in move_set if move[1] == promotion_rank]
-        for move in promotion_squares:
-            move_set.discard(move)
-            for promotion_type in list("QBRN"):
-                move_set.add(f"{move}{promotion_type}")
-        return move_set
+
+        moves_to_check = [move for move in moves_to_check if move != None]
+        return self.return_moves_without_king_in_check(moves_to_check, board)
+        
+
+
+    def add_promotion_letters_to_move(self, move: str) -> list[str]:
+        letter_list = list("QRNB")
+        return [f"{move}{letter}" for letter in letter_list]
+
+
+
 
 
 def load_pieces() -> list[Piece]:
@@ -414,6 +434,7 @@ class OnBoardPieces:
         self.piece_list = load_pieces()
     
     def remove(self, square: str) -> Piece:
+        square = square[:2]
         for piece in self.piece_list:
             if piece.position == square:
                 idx = self.piece_list.index(piece)
@@ -565,8 +586,19 @@ class OffBoardPieces:
     
     def get_points(self, white:bool|str):
         return sum(self.get_pieces(white=white))
+    
 
-                
+
+class MoveType(Enum):
+    STANDARD = 0
+    CASTLE = 1
+    PROMOTION = 2
+    EN_PASSANT_SET = 3
+    EN_PASSANT_TAKE = 4
+
+
+
+
 class Board:
 
     def __init__(self):
@@ -609,49 +641,80 @@ class Board:
         self.pieces.piece_list.append(promotion)
 
 
-    def move(self, piece: Piece, square: str, turn: int):
-        player = bool(turn % 2)
-        short_castle, long_castle = 'O-O', 'O-O-O'
-        if square[:2] in self.pieces.get_set('position', not player):
-            self.remove_piece_at(square)
-        # Check for pawn promtion
-        if square[-1] in list('QBNR'):
-            piece.set_position(square[:2])
-            self.promote(square=square[:2], promote_to=square[-1], white=piece.white)
-        # Check for En Passant
+    def move(self, piece: Piece, square: str):
+        move_type = self.determine_move_type(piece, square)
+        match move_type:
+            case MoveType.STANDARD:
+                if square in self.pieces.get_set('position', not piece.white):
+                    self.remove_piece_at(square)
+                piece.set_position(square)
+                self.set_en_passant(None)
+            case MoveType.CASTLE:
+                self.handle_castling(piece, square)
+                self.set_en_passant(None)
+            case MoveType.EN_PASSANT_SET:
+                piece.set_position(square)
+                self.set_en_passant(square)
+            case MoveType.EN_PASSANT_TAKE:
+                self.handle_en_passant_take(piece, square)
+                self.set_en_passant(None)
+            case MoveType.PROMOTION:
+                self.handle_promotion(piece, square)
+                self.set_en_passant(None)
+
+
+    def determine_move_type(self, piece: Piece, square: str) -> MoveType:
+        en_passant_start = ('7', '2')[piece.white]
+        en_passant_end = ('5', '4')[piece.white]
+        if square == 'O-O' or square == 'O-O-O':
+            return MoveType.CASTLE
         elif piece.__class__.__name__ == 'Pawn':
-            en_passant_start = ('7', '2')[player]
-            en_passant_move = ('5', '4')[player]
-            # Was it an en passant take?
-            if square == (self.squares.down(self.en_passant), self.squares.up(self.en_passant))[player]:
-                self.remove_piece_at(self.en_passant)
-            # Is en passant allowed on next move? 
-            # board.en_passant becomes the square the pawn moved to.
-            if piece.position[-1] == en_passant_start and square[-1] == en_passant_move:
-                self.en_passant = square
+            if piece.position[1] == en_passant_start and square[1] == en_passant_end:
+                return MoveType.EN_PASSANT_SET
+            elif square == (self.squares.down(self.en_passant), self.squares.up(self.en_passant))[piece.white]:
+                return MoveType.EN_PASSANT_TAKE
+            elif square[-1] in list('QRNB'):
+                return MoveType.PROMOTION
             else:
-                self.en_passant = None
-        # For Short and Long Castle
-        elif piece.__class__.__name__ == 'King' and square in [short_castle, long_castle]:
-            if square == short_castle:
-                if turn % 2:
-                    piece.set_position('g1')
-                    self.pieces['h1'].set_position('f1')
-                    return None
-                else:
-                    piece.set_position('g8')
-                    self.pieces['h8'].set_position('f8')
-                    return None
-            else: # Long Castle
-                if turn % 2:
-                    piece.set_position('c1')
-                    self.pieces['a1'].set_position('d1')
-                    return None
-                else:
-                    piece.set_position('c8')
-                    self.pieces['a8'].set_position('d8')
-                    return None               
+                return MoveType.STANDARD
+        else:
+            return MoveType.STANDARD
+    
+    def set_en_passant(self, square: str|None):
+        self.en_passant = square
+
+    def handle_promotion(self, piece: Piece, square: str):
+        move = square[:2]
+        promotion_letter = square[2]
+        if move in self.pieces.get_set('position', not piece.white):
+            self.remove_piece_at(move)
+        piece.set_position(move)
+        self.promote(move, promotion_letter, piece.white)
+
+    def handle_castling(self, piece: Piece, square: str):
+        short_castle, long_castle = 'O-O', 'O-O-O'
+        if square == short_castle:
+            if piece.white:
+                piece.set_position('g1')
+                self.pieces['h1'].set_position('f1')
+            else:
+                piece.set_position('g8')
+                self.pieces['h8'].set_position('f8')
+        else: # Long Castle
+            if piece.white:
+                piece.set_position('c1')
+                self.pieces['a1'].set_position('d1')
+            else:
+                piece.set_position('c8')
+                self.pieces['a8'].set_position('d8')
+    
+    def handle_en_passant_take(self, piece: Piece, square):
+        self.remove_piece_at(self.en_passant)
         piece.set_position(square)
+
+           
+
+
 
 
 class GameState(Enum):
@@ -734,7 +797,7 @@ class Game:
             return SelectionType.SELECTED
 
     def move_and_next_turn(self) -> GameState:
-        self.board.move(self.piece_selection, self.square_selection, self.turn)
+        self.board.move(self.piece_selection, self.square_selection)
         self.turn += 1
         self.piece_selection = None
         self.square_selection = None
@@ -744,6 +807,7 @@ class Game:
             return GameState.CHECKMATE
         else: 
             return GameState.PLAY
+        
 
 
         
