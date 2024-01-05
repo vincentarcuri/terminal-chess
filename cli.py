@@ -11,7 +11,7 @@ class UnicodePieces(Enum):
     WHITE_QUEEN = u"\u2655"
     WHITE_ROOK = u"\u2656"
     WHITE_BISHOP = u"\u2657"
-    WHITE_KNIGHT = u"\u2659"
+    WHITE_KNIGHT = u"\u2658"
     WHITE_PAWN = u"\u2659"
     BLACK_KING = u"\u265A"
     BLACK_QUEEN = u"\u265B"
